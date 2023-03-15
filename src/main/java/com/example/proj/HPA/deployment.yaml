@@ -19,6 +19,15 @@ spec:
           image: elnalouti/sigrepo:tagname
           ports:
             - containerPort: 8087
+          env:
+            - name: SPRING_RABBITMQ_HOST
+              value: 172.17.0.3
+            - name: SPRING_RABBITMQ_USERNAME
+              value: guest
+            - name: SPRING_RABBITMQ_PASSWORD
+              value: guest
+            - name: SPRING_RABBITMQ_VIRTUAL_HOST
+              value: /
 ---
 apiVersion: v1
 kind: Service
@@ -26,9 +35,9 @@ metadata:
   name: spring-consumer-service
 spec:
   selector:
-    app: spring-consumer
+    app: consumer-app
   ports:
     - name: http
       port: 8087
       targetPort: 8087
-  type: ClusterIP
+  type: LoadBalancer
