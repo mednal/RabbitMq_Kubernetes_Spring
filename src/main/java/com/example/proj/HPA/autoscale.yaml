@@ -1,0 +1,35 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-trigger-auth-rabbitmq-conn
+  namespace: default
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: rabbitmq-credentials
+      key: host
+    - parameter: username
+      name: rabbitmq-credentials
+      key: username
+    - parameter: password
+      name: rabbitmq-credentials
+      key: password
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: rabbitmq-scaledobjecto
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: spring-consumer-deployment
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        queueName: projqueue
+        mode: QueueLength
+        value: "5"
+        metricName: custom-testqueue # DEPRECATED: This parameter is deprecated as of KEDA v2.10 and will be removed in version `2.12`. optional. Generated value would be `rabbitmq-custom-testqueue`
+      authenticationRef:
+        name: keda-trigger-auth-rabbitmq-conn
