@@ -21,7 +21,7 @@ spec:
             - containerPort: 8087
           env:
             - name: SPRING_RABBITMQ_HOST
-              value: 172.17.0.3
+              value: 172.17.0.2
             - name: SPRING_RABBITMQ_USERNAME
               value: guest
             - name: SPRING_RABBITMQ_PASSWORD
