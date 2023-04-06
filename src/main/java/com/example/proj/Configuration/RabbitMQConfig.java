@@ -35,4 +35,5 @@ public class RabbitMQConfig {
     public RabbitAdmin rabbitAdmin() {
         return new RabbitAdmin(connectionFactory());
     }
+
 }

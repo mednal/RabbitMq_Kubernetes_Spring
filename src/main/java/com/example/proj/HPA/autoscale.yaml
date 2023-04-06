@@ -9,7 +9,7 @@ spec:
     - type: rabbitmq
       metadata:
         queueName: projqueue
-        host: amqp://guest:guest@172.17.0.3:5672
+        host: amqp://guest:guest@172.17.0.2:5672
         mode: QueueLength
         port: "5672"
         username: guest
@@ -23,13 +23,13 @@ spec:
     horizontalPodAutoscalerConfig:
       behavior:
         scaleDown:
-          stabilizationWindowSeconds: 300
+          stabilizationWindowSeconds: 20
           policies:
             - type: Pods
               value: 1
               periodSeconds: 60
         scaleUp:
-          stabilizationWindowSeconds: 300
+          stabilizationWindowSeconds: 20
           policies:
             - type: Pods
               value: 2
