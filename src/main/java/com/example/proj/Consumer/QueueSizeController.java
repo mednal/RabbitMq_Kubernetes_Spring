@@ -12,18 +12,30 @@ import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.converter.JsonbMessageConverter;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.amqp.core.Message;
 import com.rabbitmq.client.Connection;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+import javax.annotation.PostConstruct;
+
 @RestController
 @RequestMapping("/queues")
 public class QueueSizeController {
@@ -121,6 +133,70 @@ public class QueueSizeController {
         return "Consumed and processed " + messagePayloads.size() + " messages from queue " + queueName + ".";
     }
 */
+
+    @RequestMapping(value = "/delay/{seconds}", method = RequestMethod.GET)
+    public ResponseEntity<String> delay(@PathVariable int seconds) throws InterruptedException {
+        longRunningRequestInProgress.set(true);
+        try {
+            System.out.println("Starting long-running request for " + seconds + " seconds");
+            Thread.sleep(seconds * 1000);
+            System.out.println("Long-running request completed");
+            return ResponseEntity.ok("Long-running request completed");
+        } finally {
+            longRunningRequestInProgress.set(false);
+        }
+    }
+
+    private final AtomicBoolean longRunningRequestInProgress = new AtomicBoolean(false);
+
+    @PostConstruct
+    public void init() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (isLongRunningRequestInProgress()) {
+                System.out.println("Long-running request in progress. Waiting for it to complete before shutting down.");
+                waitForLongRunningRequestToComplete();
+                System.out.println("Long-running request completed. Shutting down.");
+            }
+        }));
+    }
+    public boolean isLongRunningRequestInProgress() {
+        return longRunningRequestInProgress.get();
+    }
+
+    public void waitForLongRunningRequestToComplete() {
+        while (isLongRunningRequestInProgress()) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                System.out.println("Interrupted while waiting for long-running request to complete");
+            }
+        }
+    }
+   /* @GetMapping("/other-endpoint")
+    public Mono<Void> simulateConnection() {
+        return Mono.<Void>never().then();
+    }*/
+
+
+    private List<String> activeSessions = new ArrayList<>();
+
+    @GetMapping("/active-users")
+    public ResponseEntity<String> getActiveUsers() {
+        if (activeSessions.isEmpty()) {
+            return ResponseEntity.ok("No active users");
+        } else {
+            return ResponseEntity.ok("Active users: " + activeSessions.size());
+        }
+    }
+    @PostMapping("/add-user")
+    public void addSession(@RequestBody String sessionId) {
+        activeSessions.add(sessionId);
+    }
+    @PostMapping("/remove-user")
+    public void removeSession(String sessionId) {
+        activeSessions.remove(sessionId);
+    }
+
     @Autowired
     private RabbitMQConfig rabbitMQConfig;
 
