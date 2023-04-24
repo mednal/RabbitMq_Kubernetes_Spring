@@ -1,40 +1,38 @@
 package com.example.proj.Consumer;
 
-import ch.qos.logback.classic.pattern.MessageConverter;
 import com.example.proj.Configuration.RabbitMQConfig;
 import com.rabbitmq.client.*;
-import org.springframework.amqp.rabbit.annotation.Queue;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
+import io.fabric8.kubernetes.client.DefaultKubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.dsl.ExecListener;
+import io.fabric8.kubernetes.client.dsl.ExecWatch;
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.ApiException;
+import io.kubernetes.client.openapi.Configuration;
+import io.kubernetes.client.openapi.apis.CoreV1Api;
+import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.util.Config;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
-import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.messaging.converter.JsonbMessageConverter;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.amqp.core.Message;
-import com.rabbitmq.client.Connection;
 
 import java.io.IOException;
-import java.time.Duration;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.Connection;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import javax.annotation.PostConstruct;
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 @RestController
 @RequestMapping("/queues")
@@ -54,6 +52,7 @@ public class QueueSizeController {
     private String queueName;
     @Autowired
     private RabbitTemplate rabbitTemplate;
+    private String hostname;
 
 
     @GetMapping("/size")
@@ -86,56 +85,9 @@ public class QueueSizeController {
         return "Message published to queue " + queueName + ": " + messagePayload;
     }
 
-    /*
-        @GetMapping("/consume")
-        public String consumeFromQueue() {
-            int messagesToConsume = 2; // set the number of messages to consume
-            List<Message> messages = new ArrayList<>();
-
-            for (int i = 0; i < messagesToConsume; i++) {
-                Message message = rabbitTemplate.receive(queueName);
-                if (message == null) {
-                    break; // break the loop if there are no more messages in the queue
-                }
-                messages.add(message);
-            }
-
-            for (Message message : messages) {
-                rabbitTemplate.receiveAndReply(queueName, message1 -> {
-                    // process the message here
-                    System.out.println("Consuming message with payload: " + new String(message.getBody()));
-                    return null;
-                });
-            }
-
-
-            int remainingMessages = rabbitTemplate.execute(channel -> {
-                AMQP.Queue.DeclareOk declareOk = channel.queueDeclarePassive(queueName);
-                return declareOk.getMessageCount();
-            });
-
-            return "Consumed " + messages.size() + " messages from queue " + queueName + ". " +
-                    remainingMessages + " messages remaining in the queue.";
-        }*/
- /*   @GetMapping("/unack")
-    public String consumeFromQueue() {
-        int messagesToConsume = 1; // set the number of messages to consume
-        List<String> messagePayloads = new ArrayList<>();
-
-        for (int i = 0; i < messagesToConsume; i++) {
-            Message message = rabbitTemplate.receive(queueName);
-            if (message == null) {
-                break; // break the loop if there are no more messages in the queue
-            }
-            messagePayloads.add(new String(message.getBody()));
-        }
-
-        return "Consumed and processed " + messagePayloads.size() + " messages from queue " + queueName + ".";
-    }
-*/
-
     @RequestMapping(value = "/delay/{seconds}", method = RequestMethod.GET)
-    public ResponseEntity<String> delay(@PathVariable int seconds) throws InterruptedException {
+    public ResponseEntity<String> delay(@PathVariable int seconds , HttpServletRequest request) throws InterruptedException {
+        currentRequest = request;
         longRunningRequestInProgress.set(true);
         try {
             System.out.println("Starting long-running request for " + seconds + " seconds");
@@ -147,18 +99,39 @@ public class QueueSizeController {
         }
     }
 
+    private String getHostname() {
+        try {
+            return InetAddress.getLocalHost().getHostName();
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+            return "unknown";
+        }
+    }
+
+
     private final AtomicBoolean longRunningRequestInProgress = new AtomicBoolean(false);
+
+    private HttpServletRequest currentRequest;
 
     @PostConstruct
     public void init() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            if (isLongRunningRequestInProgress()) {
+            if (currentRequest != null && shouldWaitForOngoingRequest(currentRequest)) {
                 System.out.println("Long-running request in progress. Waiting for it to complete before shutting down.");
                 waitForLongRunningRequestToComplete();
                 System.out.println("Long-running request completed. Shutting down.");
             }
         }));
     }
+
+    public boolean shouldWaitForOngoingRequest(HttpServletRequest request) {
+        String requestHostname = (String) request.getAttribute("X-Pod-Hostname");
+        String podName = System.getenv("KUBE_POD_NAME");
+
+        return requestHostname != null && requestHostname.equals(podName);
+    }
+
+
     public boolean isLongRunningRequestInProgress() {
         return longRunningRequestInProgress.get();
     }
@@ -172,12 +145,71 @@ public class QueueSizeController {
             }
         }
     }
-   /* @GetMapping("/other-endpoint")
-    public Mono<Void> simulateConnection() {
-        return Mono.<Void>never().then();
-    }*/
 
 
+    @PostMapping("/api/cpu-stress/{podName}/{durationInSeconds}/{cpuPercentage}")
+    public String increaseCpuUsage(@PathVariable String podName, @PathVariable int durationInSeconds, @PathVariable int cpuPercentage) throws IOException, ApiException, InterruptedException {
+        ApiClient client = Config.defaultClient();
+        Configuration.setDefaultApiClient(client);
+        CoreV1Api api = new CoreV1Api();
+
+        // Replace "default" with your target namespace, if needed
+        V1Pod pod = api.readNamespacedPod(podName, "default", null, null, null);
+
+        if (pod == null) {
+            return "Pod not found";
+        }
+
+        String stressCommand = String.format("stress-ng --cpu 1 --cpu-load %d --timeout %ds", cpuPercentage, durationInSeconds);
+
+        // Executing the stress command in the first container of the specified pod
+        String[] command = new String[]{"/bin/sh", "-c", stressCommand};
+        KubernetesClient k8sClient = new DefaultKubernetesClient();
+
+        // Create a CountDownLatch to wait for the stress command to complete
+        CountDownLatch latch = new CountDownLatch(1);
+
+        ExecWatch watch = k8sClient.pods()
+                .inNamespace("default")
+                .withName(podName)
+                .inContainer(pod.getSpec().getContainers().get(0).getName())
+                .readingInput(null)
+                .writingOutput(System.out)
+                .writingError(System.err)
+                .withTTY()
+                .usingListener(new SimpleListener(latch))
+                .exec(command);
+
+        // Wait for the stress command to complete
+        latch.await();
+
+        // Close the WebSocket connection
+        watch.close();
+
+        return "Increased CPU usage for pod: " + podName;
+    }
+
+    private static class SimpleListener implements ExecListener {
+        private final CountDownLatch latch;
+
+        public SimpleListener(CountDownLatch latch) {
+            this.latch = latch;
+        }
+
+
+
+        @Override
+        public void onFailure(Throwable throwable, Response response) {
+            System.out.println("Failed");
+            latch.countDown();
+        }
+
+        @Override
+        public void onClose(int code, String reason) {
+            System.out.println("Finished");
+            latch.countDown();
+        }
+    }
     private List<String> activeSessions = new ArrayList<>();
 
     @GetMapping("/active-users")
