@@ -15,9 +15,11 @@ import io.kubernetes.client.util.Config;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.amqp.core.Message;
+import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -55,6 +57,8 @@ public class QueueSizeController {
     private String hostname;
 
 
+
+
     @GetMapping("/size")
     public String getQueueSize() {
         QueueInformation queueInfo = rabbitTemplate.execute(channel -> {
@@ -79,24 +83,21 @@ public class QueueSizeController {
             return "No messages found in queue " + queueName;
         }
     }
+
     @PostMapping("/publish")
     public String publishMessage(@RequestBody String messagePayload, @RequestParam("queueName") String queueName) {
         rabbitTemplate.convertAndSend(queueName, messagePayload);
         return "Message published to queue " + queueName + ": " + messagePayload;
     }
 
-    @RequestMapping(value = "/delay/{seconds}", method = RequestMethod.GET)
-    public ResponseEntity<String> delay(@PathVariable int seconds , HttpServletRequest request) throws InterruptedException {
-        currentRequest = request;
-        longRunningRequestInProgress.set(true);
-        try {
-            System.out.println("Starting long-running request for " + seconds + " seconds");
-            Thread.sleep(seconds * 1000);
-            System.out.println("Long-running request completed");
-            return ResponseEntity.ok("Long-running request completed");
-        } finally {
-            longRunningRequestInProgress.set(false);
-        }
+    @GetMapping("/delay/{seconds}")
+    public ResponseEntity<String> testDelay(@PathVariable int seconds) throws InterruptedException {
+        // Simulate a long-running request by sleeping for the specified number of seconds
+        System.out.println("Starting long-running request for " + seconds + " seconds");
+        Thread.sleep(seconds * 1000);
+        System.out.println("Long-running request completed");
+
+        return ResponseEntity.ok("Request completed after " + seconds + " seconds.");
     }
 
     private String getHostname() {
@@ -116,19 +117,23 @@ public class QueueSizeController {
     @PostConstruct
     public void init() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            if (currentRequest != null && shouldWaitForOngoingRequest(currentRequest)) {
-                System.out.println("Long-running request in progress. Waiting for it to complete before shutting down.");
-                waitForLongRunningRequestToComplete();
-                System.out.println("Long-running request completed. Shutting down.");
+            HttpServletRequest currentRequest = RequestInterceptor.getCurrentRequest();
+            if (currentRequest != null) {
+                System.out.println("Request in progress. Waiting for it to complete before shutting down.");
+                waitForRequestToComplete(currentRequest);
+                System.out.println("Request completed. Shutting down.");
             }
         }));
     }
 
-    public boolean shouldWaitForOngoingRequest(HttpServletRequest request) {
-        String requestHostname = (String) request.getAttribute("X-Pod-Hostname");
-        String podName = System.getenv("KUBE_POD_NAME");
-
-        return requestHostname != null && requestHostname.equals(podName);
+    public void waitForRequestToComplete(HttpServletRequest request) {
+        while (RequestInterceptor.getCurrentRequest() != null) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                System.out.println("Interrupted while waiting for request to complete");
+            }
+        }
     }
 
 

@@ -17,3 +17,6 @@ spec:
         value: "5"
   minReplicaCount: 1
   maxReplicaCount: 5
+advanced:
+    scaleUpCooldownPeriod: 600
+    scaleDownCooldownPeriod: 300
