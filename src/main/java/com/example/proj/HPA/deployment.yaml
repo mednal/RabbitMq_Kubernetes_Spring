@@ -13,7 +13,6 @@ spec:
     metadata:
       labels:
         app: consumer-app
-        gracefulShutdown: "true"
     spec:
       terminationGracePeriodSeconds: 120
       containers:
@@ -30,15 +29,6 @@ spec:
               value: guest
             - name: SPRING_RABBITMQ_VIRTUAL_HOST
               value: /
-            - name: KUBE_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: KUBE_POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-
 ---
 apiVersion: v1
 kind: Service

@@ -1,6 +1,8 @@
 package com.example.proj.Consumer;
 
 import com.example.proj.Configuration.RabbitMQConfig;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.*;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -24,11 +26,13 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.annotation.PostConstruct;
 import javax.servlet.FilterChain;
@@ -72,17 +76,62 @@ public class QueueSizeController {
 
 
 
+
     @GetMapping("/consume/single")
     public String consumeSingleMessageFromQueue() {
         Message message = rabbitTemplate.receive(queueName);
         if (message != null) {
             // process the message
-            System.out.println("Received message: " + new String(message.getBody()));
-            return "Consumed message with payload: " + new String(message.getBody());
+            String messageBody = new String(message.getBody(), StandardCharsets.UTF_8);
+            System.out.println("Received message: " + messageBody);
+
+            // Call handleMessage to process the message
+            handleMessage(messageBody);
+
+            return "Consumed message with payload: " + messageBody;
         } else {
             return "No messages found in queue " + queueName;
         }
     }
+
+    public void performCpuIntensiveTask() {
+        long start = System.currentTimeMillis();
+        int iterations = 100_000_000;
+        int repeats = 30; // Repeating the calculations n times
+        double sum = 0;
+
+        for (int repeat = 0; repeat < repeats; repeat++) {
+            for (int i = 1; i <= iterations; i++) {
+                sum += Math.sqrt(i);
+            }
+        }
+
+        long end = System.currentTimeMillis();
+        System.out.println("CPU-intensive task completed in " + (end - start) + " ms, result: " + sum);
+    }
+
+
+
+    private final AtomicInteger messagesBeingProcessed = new AtomicInteger(0);
+
+    public void handleMessage(String message) {
+        messagesBeingProcessed.incrementAndGet();
+        try {
+            System.out.println("Starting to process message: " + message);
+
+            // Perform a CPU-intensive task
+            performCpuIntensiveTask();
+
+            System.out.println("Message processing completed: " + message);
+        } catch (Exception e) {
+            System.out.println("Error while processing the message: " + e.getMessage());
+        } finally {
+            messagesBeingProcessed.decrementAndGet();
+        }
+    }
+
+
+
 
     @PostMapping("/publish")
     public String publishMessage(@RequestBody String messagePayload, @RequestParam("queueName") String queueName) {
@@ -100,19 +149,12 @@ public class QueueSizeController {
         return ResponseEntity.ok("Request completed after " + seconds + " seconds.");
     }
 
-    private String getHostname() {
-        try {
-            return InetAddress.getLocalHost().getHostName();
-        } catch (UnknownHostException e) {
-            e.printStackTrace();
-            return "unknown";
-        }
-    }
 
 
     private final AtomicBoolean longRunningRequestInProgress = new AtomicBoolean(false);
 
     private HttpServletRequest currentRequest;
+
 
     @PostConstruct
     public void init() {
@@ -123,8 +165,20 @@ public class QueueSizeController {
                 waitForRequestToComplete(currentRequest);
                 System.out.println("Request completed. Shutting down.");
             }
+
+            // Wait for all messages to be processed
+            System.out.println("Shutdown signal received. Waiting for message processing to complete.");
+            while (messagesBeingProcessed.get() > 0) {
+                try {
+                    Thread.sleep(1000); // wait for 1 second before checking again
+                } catch (InterruptedException e) {
+                    System.out.println("Shutdown waiting interrupted: " + e.getMessage());
+                }
+            }
+            System.out.println("All messages have been processed. Proceeding with the shutdown.");
         }));
     }
+
 
     public void waitForRequestToComplete(HttpServletRequest request) {
         while (RequestInterceptor.getCurrentRequest() != null) {
