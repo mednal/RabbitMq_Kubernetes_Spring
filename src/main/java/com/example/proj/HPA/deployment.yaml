@@ -22,6 +22,7 @@ spec:
             requests:
               memory: "64Mi"
               cpu: "500m"
+          imagePullPolicy: Always
           ports:
             - containerPort: 8087
           env:
