@@ -17,7 +17,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: consumer-container
-          image: elnalouti/sigrepo:latest
+          image: elnalouti/sigrepo:tagname
           resources:
             requests:
               memory: "64Mi"
