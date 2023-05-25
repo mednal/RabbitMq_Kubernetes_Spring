@@ -1,8 +1,5 @@
 package com.example.proj.Consumer;
-
 import com.example.proj.Configuration.RabbitMQConfig;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.*;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -17,29 +14,22 @@ import io.kubernetes.client.util.Config;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.amqp.core.Message;
-import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import javax.annotation.PostConstruct;
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-
 @RestController
 @RequestMapping("/queues")
 public class QueueSizeController {
@@ -65,12 +55,20 @@ public class QueueSizeController {
 
     @GetMapping("/size")
     public String getQueueSize() {
-        QueueInformation queueInfo = rabbitTemplate.execute(channel -> {
-            // Get the queue information
-            AMQP.Queue.DeclareOk declareOk = channel.queueDeclarePassive(queueName);
-            return new QueueInformation(declareOk.getMessageCount());
-        });
-        return "The size of the queue " + queueName + " is " + queueInfo.getMessageCount();
+        QueueInformation queueInfo;
+        try {
+            queueInfo = rabbitTemplate.execute(channel -> {
+                // Get the queue information
+                AMQP.Queue.DeclareOk declareOk = channel.queueDeclarePassive(queueName);
+                return new QueueInformation(declareOk != null ? declareOk.getMessageCount() : 0);
+            });
+        } catch (Exception e) {
+            // Handle the exception, log an error, or perform any necessary actions
+            // You can also provide a default value for queueInfo if needed
+            queueInfo = new QueueInformation(0);
+        }
+
+        return "The size of the queue " + queueName + " is " + (queueInfo != null ? queueInfo.getMessageCount() : 0);
     }
 
 
@@ -83,7 +81,7 @@ public class QueueSizeController {
         if (message != null) {
             // process the message
             String messageBody = new String(message.getBody(), StandardCharsets.UTF_8);
-            System.out.println("Received message: " + messageBody);
+            System.out.println("Received message: "  + messageBody);
 
             // Call handleMessage to process the message
             handleMessage(messageBody);
@@ -93,6 +91,35 @@ public class QueueSizeController {
             return "No messages found in queue " + queueName;
         }
     }
+    @GetMapping("/consume/singles")
+    public String consumeSingleMessageFromQueues() {
+        Message message = rabbitTemplate.receive(queueName);
+        if (message != null) {
+            // process the message
+            String messageBody = new String(message.getBody(), StandardCharsets.UTF_8);
+            System.out.println("Received message: "  + messageBody);
+
+
+            return "Consumed message with payload: " + messageBody;
+        } else {
+            return "No messages found in queue " + queueName;
+        }
+    }
+
+    @GetMapping("/getheallthresult")  // 2 hours in milliseconds
+    public void healthCheckRequest() {
+        RestTemplate restTemplate = new RestTemplate();
+        String app2Url = "http://localhost:8089/monitoring/ishealthy";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAccept(Arrays.asList(MediaType.APPLICATION_JSON));
+        HttpEntity<String> entity = new HttpEntity<>("parameters", headers);
+
+        ResponseEntity<String> result = restTemplate.exchange(app2Url, HttpMethod.GET, entity, String.class);
+
+        System.out.println(result.getBody());
+    }
+
 
     public void performCpuIntensiveTask() {
         long start = System.currentTimeMillis();
