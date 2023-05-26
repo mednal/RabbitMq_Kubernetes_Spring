@@ -166,7 +166,7 @@ public class QueueSizeController {
         return "Message published to queue " + queueName + ": " + messagePayload;
     }
 
-    @GetMapping("/delays/{seconds}")
+    @GetMapping("/delay/{seconds}")
     public ResponseEntity<String> testDelay(@PathVariable int seconds) throws InterruptedException {
         // Simulate a long-running request by sleeping for the specified number of seconds
         System.out.println("Starting long-running request for " + seconds + " seconds");
