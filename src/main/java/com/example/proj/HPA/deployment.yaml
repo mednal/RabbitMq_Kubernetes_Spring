@@ -14,10 +14,10 @@ spec:
       labels:
         app: consumer-app
     spec:
-      terminationGracePeriodSeconds: 120
+      terminationGracePeriodSeconds: 60
       containers:
         - name: consumer-container
-          image: elnalouti/sigrepo:latest
+          image: elnalouti/sigrepo:tagname
           resources:
             requests:
               memory: "64Mi"
