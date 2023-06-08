@@ -76,12 +76,12 @@ public class QueueSizeController {
 
     private static int lastPodCount = 0; // initial pod count
 
-    @Scheduled(fixedRate = 60000) // run every 15 minutes
+    @Scheduled(fixedRate = 60000) // run every 1 minute
     public void reportPodCount() throws IOException, ApiException {
         ApiClient client = Config.defaultClient();
         CoreV1Api api = new CoreV1Api(client);
 
-        V1PodList list = api.listPodForAllNamespaces(null, null, null, "app=yourappname", null, null, null, null, null, null);
+        V1PodList list = api.listPodForAllNamespaces(null, null, null, "app=consumer-deployment", null, null, null, null, null, null);
         int currentPodCount = list.getItems().size();
 
         if (currentPodCount > lastPodCount) {
