@@ -27,5 +27,5 @@ spec:
         port: "5672"
         username: guest
         password: guest
-        val ue: "1"
+        value: "1"
 
