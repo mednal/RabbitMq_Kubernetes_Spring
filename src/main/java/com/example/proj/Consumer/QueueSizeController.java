@@ -10,11 +10,13 @@ import io.kubernetes.client.openapi.ApiException;
 import io.kubernetes.client.openapi.Configuration;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
 import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.openapi.models.V1PodList;
 import io.kubernetes.client.util.Config;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.amqp.core.Message;
 import org.springframework.web.client.RestTemplate;
@@ -72,8 +74,23 @@ public class QueueSizeController {
     }
 
 
+    private static int lastPodCount = 0; // initial pod count
 
+    @Scheduled(fixedRate = 900000) // run every 15 minutes
+    public void reportPodCount() throws IOException, ApiException {
+        ApiClient client = Config.defaultClient();
+        CoreV1Api api = new CoreV1Api(client);
 
+        V1PodList list = api.listPodForAllNamespaces(null, null, null, "app=yourappname", null, null, null, null, null, null);
+        int currentPodCount = list.getItems().size();
+
+        if (currentPodCount > lastPodCount) {
+            System.out.println("Scale up event occurred! New pod count: " + currentPodCount);
+            // Add your code here to write to file or any other action
+        }
+
+        lastPodCount = currentPodCount; // update lastPodCount
+    }
 
     @GetMapping("/consume/single")
     public String consumeSingleMessageFromQueue() {
@@ -166,7 +183,7 @@ public class QueueSizeController {
         return "Message published to queue " + queueName + ": " + messagePayload;
     }
 
-    @GetMapping("/delaypipes/{seconds}")
+    @GetMapping("/delayweka/{seconds}")
     public ResponseEntity<String> testDelay(@PathVariable int seconds) throws InterruptedException {
         // Simulate a long-running request by sleeping for the specified number of seconds
         System.out.println("Starting long-running request for " + seconds + " seconds");

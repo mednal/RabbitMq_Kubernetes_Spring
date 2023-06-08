@@ -27,30 +27,5 @@ spec:
         port: "5672"
         username: guest
         password: guest
-        value: "1"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        val ue: "1"
 
