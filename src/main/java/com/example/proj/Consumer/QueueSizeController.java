@@ -21,17 +21,22 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.amqp.core.Message;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.IOException;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.PostConstruct;
 import javax.servlet.http.HttpServletRequest;
+import org.json.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 @RestController
 @RequestMapping("/queues")
 public class QueueSizeController {
@@ -76,7 +81,7 @@ public class QueueSizeController {
 
     private static int lastPodCount = 0; // initial pod count
 
-    @Scheduled(fixedRate = 60000) // run every 1 minute
+   /* @Scheduled(fixedRate = 60000) // run every 1 minute
     public void reportPodCount() throws IOException, ApiException {
         ApiClient client = Config.defaultClient();
         CoreV1Api api = new CoreV1Api(client);
@@ -90,6 +95,47 @@ public class QueueSizeController {
         }
 
         lastPodCount = currentPodCount; // update lastPodCount
+    }*/
+   private final Map<String, LocalDateTime> scaleUpTimes = new HashMap<>();
+
+    @Scheduled(fixedRate = 120000)  // run every 2 minutes
+    public void checkPods() {
+        try {
+            String command = "kubectl get pods -o json";
+            Process proc = Runtime.getRuntime().exec(command);
+            BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+
+
+            // parse JSON output
+            JSONObject json = new JSONObject(stdInput.readLine());
+            JSONArray items = json.getJSONArray("items");
+
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject pod = items.getJSONObject(i);
+                String podName = pod.getJSONObject("metadata").getString("name");
+                String podStatus = pod.getJSONObject("status").getString("phase");
+
+                if ("Running".equals(podStatus) && !scaleUpTimes.containsKey(podName)) {
+                    // new scale up event
+                    scaleUpTimes.put(podName, LocalDateTime.now());
+                } else if ("Terminated".equals(podStatus) && scaleUpTimes.containsKey(podName)) {
+                    // corresponding scale down event
+                    LocalDateTime scaleUpTime = scaleUpTimes.get(podName);
+                    Duration duration = Duration.between(scaleUpTime, LocalDateTime.now());
+
+                    // write to file
+                    FileWriter fileWriter = new FileWriter("scale_events.txt", true);
+                    PrintWriter printWriter = new PrintWriter(fileWriter);
+                    printWriter.println(LocalDateTime.now().format(DateTimeFormatter.ISO_DATE) + "," + scaleUpTime.format(DateTimeFormatter.ISO_TIME) + "," + duration.toMinutes());
+                    printWriter.close();
+
+                    // remove entry from map
+                    scaleUpTimes.remove(podName);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     @GetMapping("/consume/single")
