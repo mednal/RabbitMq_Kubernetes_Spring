@@ -81,7 +81,7 @@ public class QueueSizeController {
         ApiClient client = Config.defaultClient();
         CoreV1Api api = new CoreV1Api(client);
 
-        V1PodList list = api.listPodForAllNamespaces(null, null, null, "consumer-app", null, null, null, null, null, null);
+        V1PodList list = api.listPodForAllNamespaces(null, null, null, "app=consumer-app", null, null, null, null, null, null);
         int currentPodCount = list.getItems().size();
 
         if (currentPodCount > lastPodCount) {
