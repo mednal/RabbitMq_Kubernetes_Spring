@@ -124,7 +124,8 @@ public class QueueSizeController {
                     Duration duration = Duration.between(scaleUpTime, LocalDateTime.now());
 
                     // write to file
-                    FileWriter fileWriter = new FileWriter("scale_events.txt", true);
+                    System.out.println("the pod scaled down");
+                    FileWriter fileWriter = new FileWriter("scale_up_events.txt", true);
                     PrintWriter printWriter = new PrintWriter(fileWriter);
                     printWriter.println(LocalDateTime.now().format(DateTimeFormatter.ISO_DATE) + "," + scaleUpTime.format(DateTimeFormatter.ISO_TIME) + "," + duration.toMinutes());
                     printWriter.close();
