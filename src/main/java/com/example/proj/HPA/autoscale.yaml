@@ -5,10 +5,6 @@ metadata:
 spec:
   scaleTargetRef:
     name: consumer-deployment
-  pollingInterval: 5
-  cooldownPeriod: 10
-  minReplicaCount: 0
-  maxReplicaCount: 5
   triggers:
     - type: rabbitmq
       metadata:
@@ -18,14 +14,6 @@ spec:
         port: "5672"
         username: guest
         password: guest
-        value: "8"
-    - type: rabbitmq
-      metadata:
-        queueName: healthqueue
-        host: amqp://guest:guest@172.17.0.2:5672
-        mode: QueueLength
-        port: "5672"
-        username: guest
-        password: guest
-        value: "1"
-
+        value: "5"
+  minReplicaCount: 1
+  maxReplicaCount: 5

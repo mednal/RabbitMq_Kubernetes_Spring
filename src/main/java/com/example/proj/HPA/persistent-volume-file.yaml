@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: shared-volume
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: shared-volume-class
+  nfs:
+    path: /c/Users/HP/Desktop/fold
+    server: 172.17.0.1
+
+
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-volume-claim
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: shared-volume-class
+  volumeName: shared-volume
+

@@ -50,11 +50,7 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>io.prometheus</groupId>
-            <artifactId>simpleclient_spring_boot</artifactId>
-            <version>0.7.0</version>
-        </dependency>
+
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>okhttp</artifactId>
@@ -72,15 +68,17 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-            <version>3.1.0</version>
-        </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-actuator</artifactId>
+            </dependency>
+
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-registry-prometheus</artifactId>
+                <scope>runtime</scope>
+            </dependency>
+
 
         <dependency>
             <groupId>org.json</groupId>
@@ -88,6 +86,19 @@
             <version>20230227</version>
         </dependency>
 
+
+        <!-- https://mvnrepository.com/artifact/commons-io/commons-io -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.13.0</version>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/nz.ac.waikato.cms.weka/weka-stable -->
+        <dependency>
+            <groupId>nz.ac.waikato.cms.weka</groupId>
+            <artifactId>weka-stable</artifactId>
+            <version>3.8.0</version>
+        </dependency>
 
 
     </dependencies>

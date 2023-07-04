@@ -1,6 +1,8 @@
 package com.example.proj.Consumer;
 import com.example.proj.Configuration.RabbitMQConfig;
+import com.example.proj.Entity.DatasetEntry;
 import com.rabbitmq.client.*;
+import com.rabbitmq.client.impl.Environment;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.ExecListener;
@@ -10,21 +12,29 @@ import io.kubernetes.client.openapi.ApiException;
 import io.kubernetes.client.openapi.Configuration;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
 import io.kubernetes.client.openapi.models.V1Pod;
-import io.kubernetes.client.openapi.models.V1PodList;
 import io.kubernetes.client.util.Config;
+import io.prometheus.client.CollectorRegistry;
+import io.prometheus.client.exporter.HTTPServer;
+import okhttp3.*;
+import okhttp3.ResponseBody;
+import org.apache.commons.io.FileUtils;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.http.MediaType;
+import org.springframework.util.FileCopyUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.amqp.core.Message;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
@@ -32,10 +42,25 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.PostConstruct;
+import javax.annotation.Resource;
+import javax.management.Query;
 import javax.servlet.http.HttpServletRequest;
-import org.json.*;
+import io.prometheus.client.Gauge;
+import io.prometheus.client.exporter.HTTPServer;
 import org.json.JSONArray;
 import org.json.JSONObject;
+
+import java.io.IOException;
+
+import okhttp3.*;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @RestController
 @RequestMapping("/queues")
@@ -58,8 +83,163 @@ public class QueueSizeController {
     private String hostname;
 
 
+    @Value("${content}")
+    private String content;
 
 
+
+    @PostMapping("/write")
+    public String writeFile() {
+        String filePath = "/home/dataset.txt"; // Update the file path to the correct location
+        File outputFile = new File(filePath);
+        try {
+            FileUtils.writeStringToFile(outputFile, "Hello", StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return "Error occurred while writing to file.";
+        }
+
+        return "Successfully wrote 'Hello' to file.";
+    }
+
+
+
+    Gauge podRunningDuration = Gauge.build()
+            .name("pod_running_duration_seconds")
+            .help("Running duration of pods in a deployment")
+            .labelNames("deployment", "pod", "creation_time")
+            .register();
+    @GetMapping("/GetPodRunningTime")
+    public static void GetPodRunningTime(String[] args) throws IOException {
+        List<DatasetEntry> dataset = new ArrayList<>();
+        String filePath = "/home/dataset.arff"; // Update the file path to the correct location
+
+        OkHttpClient client = new OkHttpClient();
+        String prometheusQuery = "last_over_time(timestamp(kube_pod_status_phase{phase=\"Succeeded\",pod=~\"consumer-deployment.*\"})[1h:]) - ignoring(phase) group_right() last_over_time((kube_pod_created{pod=~\"consumer-deployment.*\"})[1h:])";
+        String prometheusURL = "http://prometheus-server/api/v1/query";
+
+        HttpUrl.Builder urlBuilder = HttpUrl.parse(prometheusURL).newBuilder();
+        urlBuilder.addQueryParameter("query", prometheusQuery);
+
+        Request request = new Request.Builder()
+                .url(urlBuilder.build())
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (response.isSuccessful()) {
+                ResponseBody body = response.body();
+                if (body != null) {
+                    JSONObject jsonObject = new JSONObject(body.string());
+                    JSONArray resultArray = jsonObject.getJSONObject("data").getJSONArray("result");
+
+                    for (int i = 0; i < resultArray.length(); i++) {
+                        JSONObject resultObject = resultArray.getJSONObject(i);
+                        String pod = resultObject.getJSONObject("metric").getString("pod");
+                        double runningTime = resultObject.getJSONArray("value").getDouble(1);
+
+                        // Fetch creation date from Prometheus using kube_pod_created metric
+                        String creationDateQuery = "last_over_time((kube_pod_created{pod=\"" + pod + "\"})[1h:])";
+                        double creationTimestamp = queryPrometheus(prometheusURL, creationDateQuery);
+                        LocalDateTime creationDateTime = LocalDateTime.ofInstant(
+                                Instant.ofEpochSecond((long) creationTimestamp), ZoneId.systemDefault());
+
+                        System.out.println("Pod: " + pod +
+                                ", Running Time: " + runningTime + " seconds" +
+                                ", Creation Date: " + creationDateTime);
+
+                        // Add entry to the dataset
+                        DatasetEntry entry = new DatasetEntry(creationDateTime, runningTime);
+                        dataset.add(entry);
+                    }
+                }
+            } else {
+                System.out.println("Request failed with response code: " + response.code());
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        writeDatasetToFile(dataset, filePath);
+    }
+
+    public static double queryPrometheus(String url, String query) throws IOException {
+        OkHttpClient client = new OkHttpClient();
+
+        HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+        urlBuilder.addQueryParameter("query", query);
+
+        Request request = new Request.Builder()
+                .url(urlBuilder.build())
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (response.isSuccessful()) {
+                ResponseBody body = response.body();
+                if (body != null) {
+                    JSONObject jsonObject = new JSONObject(body.string());
+                    JSONArray resultArray = jsonObject.getJSONObject("data").getJSONArray("result");
+
+                    if (resultArray.length() > 0) {
+                        double value = resultArray.getJSONObject(0).getJSONArray("value").getDouble(1);
+                        return value;
+                    }
+                }
+            } else {
+                System.out.println("Request failed with response code: " + response.code());
+            }
+        }
+
+        return 0.0;
+    }
+
+
+
+    private static void writeDatasetToFile(List<DatasetEntry> dataset, String filePath) {
+        // Append ".arff" extension if it doesn't exist
+        if (!filePath.endsWith(".arff")) {
+            filePath = filePath + ".arff";
+        }
+
+        try (PrintWriter writer = new PrintWriter(new FileWriter(filePath, true))) {
+            // Write ARFF header if the file is empty
+            File file = new File(filePath);
+            if (file.length() == 0) {
+                writeARFFHeader(writer);
+            }
+
+            // Write dataset entries
+            for (DatasetEntry entry : dataset) {
+                LocalDateTime creationDateTime = entry.getCreationDateTime();
+                double runningDuration = entry.getRunningDuration();
+                int usefulValue = (runningDuration > 15) ? 1 : 0;
+
+                writer.println(
+                        creationDateTime.getMonth() + ", " +
+                                creationDateTime.getDayOfWeek() + ", " +
+                                creationDateTime.getHour() + ", " +
+                                "scale_up, " +
+                                runningDuration + ", " +
+                                usefulValue
+                );
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void writeARFFHeader(PrintWriter writer) {
+        // Write ARFF header
+        writer.println("@relation autoscaling");
+        writer.println();
+        writer.println("@attribute month {January, February, March, April, May, June, July, August, September, October, November, December}");
+        writer.println("@attribute day_of_week {Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday}");
+        writer.println("@attribute time_of_day {1,2,3,4,5,6,7,8,9,10,11,12}");
+        writer.println("@attribute action {scale_up}");
+        writer.println("@attribute duration numeric");
+        writer.println("@attribute useful {0,1}");
+        writer.println();
+        writer.println("@data");
+    }
     @GetMapping("/size")
     public String getQueueSize() {
         QueueInformation queueInfo;
@@ -81,63 +261,15 @@ public class QueueSizeController {
 
     private static int lastPodCount = 0; // initial pod count
 
-   /* @Scheduled(fixedRate = 60000) // run every 1 minute
-    public void reportPodCount() throws IOException, ApiException {
-        ApiClient client = Config.defaultClient();
-        CoreV1Api api = new CoreV1Api(client);
-
-        V1PodList list = api.listPodForAllNamespaces(null, null, null, "app=consumer-app", null, null, null, null, null, null);
-        int currentPodCount = list.getItems().size();
-
-        if (currentPodCount > lastPodCount) {
-            System.out.println("Scale up event occurred! New pod count: " + currentPodCount);
-            // Add your code here to write to file or any other action
-        }
-
-        lastPodCount = currentPodCount; // update lastPodCount
-    }*/
-   private final Map<String, LocalDateTime> scaleUpTimes = new HashMap<>();
-
-    @Scheduled(fixedRate = 120000)  // run every 2 minutes
-    public void checkPods() {
-        try {
-            String command = "kubectl get pods -o json";
-            Process proc = Runtime.getRuntime().exec(command);
-            BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
 
 
-            // parse JSON output
-            JSONObject json = new JSONObject(stdInput.readLine());
-            JSONArray items = json.getJSONArray("items");
 
-            for (int i = 0; i < items.length(); i++) {
-                JSONObject pod = items.getJSONObject(i);
-                String podName = pod.getJSONObject("metadata").getString("name");
-                String podStatus = pod.getJSONObject("status").getString("phase");
 
-                if ("Running".equals(podStatus) && !scaleUpTimes.containsKey(podName)) {
-                    // new scale up event
-                    scaleUpTimes.put(podName, LocalDateTime.now());
-                } else if ("Terminated".equals(podStatus) && scaleUpTimes.containsKey(podName)) {
-                    // corresponding scale down event
-                    LocalDateTime scaleUpTime = scaleUpTimes.get(podName);
-                    Duration duration = Duration.between(scaleUpTime, LocalDateTime.now());
+    private final Map<String, LocalDateTime> scaleUpTimes = new HashMap<>();
 
-                    // write to file
-                    System.out.println("the pod scaled down");
-                    FileWriter fileWriter = new FileWriter("scale_up_events.txt", true);
-                    PrintWriter printWriter = new PrintWriter(fileWriter);
-                    printWriter.println(LocalDateTime.now().format(DateTimeFormatter.ISO_DATE) + "," + scaleUpTime.format(DateTimeFormatter.ISO_TIME) + "," + duration.toMinutes());
-                    printWriter.close();
 
-                    // remove entry from map
-                    scaleUpTimes.remove(podName);
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+
+
 
     @GetMapping("/consume/single")
     public String consumeSingleMessageFromQueue() {
