@@ -1,6 +1,7 @@
 package com.example.proj.Consumer;
 import com.example.proj.Configuration.RabbitMQConfig;
 import com.example.proj.Entity.DatasetEntry;
+import com.example.proj.Entity.WekaRequestData;
 import com.rabbitmq.client.*;
 import com.rabbitmq.client.impl.Environment;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
@@ -31,36 +32,34 @@ import org.springframework.web.client.RestTemplate;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.PostConstruct;
-import javax.annotation.Resource;
-import javax.management.Query;
+
 import javax.servlet.http.HttpServletRequest;
 import io.prometheus.client.Gauge;
-import io.prometheus.client.exporter.HTTPServer;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.Date;
 
-import okhttp3.*;
+import weka.classifiers.evaluation.NumericPrediction;
+import weka.classifiers.functions.GaussianProcesses;
+import weka.classifiers.functions.LinearRegression;
+import weka.classifiers.functions.MultilayerPerceptron;
+import weka.classifiers.timeseries.WekaForecaster;
+import weka.core.Instances;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.io.IOException;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 
 @RestController
 @RequestMapping("/queues")
@@ -86,9 +85,63 @@ public class QueueSizeController {
     @Value("${content}")
     private String content;
 
+    @PostMapping("/forecast")
+    public ArrayList<ArrayList<String>> forecast(@RequestParam String algorithm, @RequestParam int nombre) {
+        ArrayList<ArrayList<String>> input = new ArrayList<>();
+
+        try {
+            String pathToWineData = "C:\\Users\\HP\\Desktop\\vermeg\\models\\dataset.arff";
+            Instances wine = new Instances(new BufferedReader(new FileReader(pathToWineData)));
+
+            int trainSize = (int) Math.round(wine.numInstances()*0.67);
+
+            int testSize = wine.numInstances()-trainSize;
+
+            Instances train = new Instances (wine,0,trainSize);
+            Instances test = new Instances (wine, trainSize,testSize);
+            ArrayList<Double> errors = new ArrayList<Double>();
+
+            WekaForecaster forecaster = new WekaForecaster();
+            forecaster.setFieldsToForecast("useful");
 
 
-    @PostMapping("/write")
+            if(algorithm.equalsIgnoreCase("Gaussian")){
+                forecaster.setBaseForecaster(new GaussianProcesses());
+            }
+            if(algorithm.equalsIgnoreCase("Linear")){
+                forecaster.setBaseForecaster(new LinearRegression());
+            }
+            if(algorithm.equalsIgnoreCase("Multilayer")){
+                forecaster.setBaseForecaster(new MultilayerPerceptron());
+            }
+            forecaster.getTSLagMaker().setTimeStampField("date");
+            forecaster.buildForecaster(wine, System.out);
+            forecaster.primeForecaster(wine);
+
+            List<List<NumericPrediction>> forecast = forecaster.forecast(nombre, System.out);
+            forecaster.postExecution();
+            for (int i = 0; i < nombre; i++) {
+                List<NumericPrediction> predsAtStep = forecast.get(i);
+
+                for (int j = 0; j < 1; j++) {
+                    NumericPrediction predForTarget = predsAtStep.get(j);
+                    System.out.print("" + predForTarget.predicted() + " ");
+                    ArrayList<String> aaaa = new ArrayList<String>();
+                    Date d = new Date((long)forecaster.getTSLagMaker().getCurrentTimeStampValue()-1000*60*(nombre-i-1));
+                    aaaa.add(d.getDay()+"-"+d.getHours()+"-"+d.getMinutes());
+                    aaaa.add(String.valueOf(predForTarget.predicted()));
+                    input.add(aaaa);
+                }
+                System.out.println();
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        return input;
+    }
+
+
+@PostMapping("/write")
     public String writeFile() {
         String filePath = "/home/dataset.txt"; // Update the file path to the correct location
         File outputFile = new File(filePath);
@@ -201,31 +254,35 @@ public class QueueSizeController {
 
         try (PrintWriter writer = new PrintWriter(new FileWriter(filePath, true))) {
             // Write ARFF header if the file is empty
+            Collections.sort(dataset, Comparator.comparing(DatasetEntry::getCreationDateTime));
+
             File file = new File(filePath);
             if (file.length() == 0) {
-                writeARFFHeader(writer);
+                writer.println("@RELATION dataset\n");
+                writer.println("@ATTRIBUTE date NUMERIC");
+                writer.println("@ATTRIBUTE duration NUMERIC");
+                writer.println("@ATTRIBUTE useful NUMERIC\n");
+                writer.println("@DATA");
             }
 
             // Write dataset entries
             for (DatasetEntry entry : dataset) {
                 LocalDateTime creationDateTime = entry.getCreationDateTime();
                 double runningDuration = entry.getRunningDuration();
-                int usefulValue = (runningDuration > 15) ? 1 : 0;
+                int usefulValue = (runningDuration > 900) ? 1 : 0;
 
+                long unixTimestamp = creationDateTime.toEpochSecond(ZoneOffset.UTC);
                 writer.println(
-                        creationDateTime.getMonth() + ", " +
-                                creationDateTime.getDayOfWeek() + ", " +
-                                creationDateTime.getHour() + ", " +
-                                "scale_up, " +
-                                runningDuration + ", " +
+                        unixTimestamp + "," +
+                                runningDuration + "," +
                                 usefulValue
                 );
             }
-
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
+
 
     private static void writeARFFHeader(PrintWriter writer) {
         // Write ARFF header
