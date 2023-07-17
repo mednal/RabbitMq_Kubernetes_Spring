@@ -31,7 +31,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.*;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -58,6 +60,8 @@ import weka.classifiers.functions.GaussianProcesses;
 import weka.classifiers.functions.LinearRegression;
 import weka.classifiers.functions.MultilayerPerceptron;
 import weka.classifiers.timeseries.WekaForecaster;
+import weka.core.Attribute;
+import weka.core.Instance;
 import weka.core.Instances;
 
 
@@ -85,50 +89,63 @@ public class QueueSizeController {
     @Value("${content}")
     private String content;
 
-    @PostMapping("/forecast")
-    public ArrayList<ArrayList<String>> forecast(@RequestParam String algorithm, @RequestParam int nombre) {
+    @RequestMapping("/forecast")
+    public ArrayList<ArrayList<String>> forecast(@RequestParam String algorithme, @RequestParam int nombre) {
         ArrayList<ArrayList<String>> input = new ArrayList<>();
 
         try {
             String pathToWineData = "C:\\Users\\HP\\Desktop\\vermeg\\models\\dataset.arff";
             Instances wine = new Instances(new BufferedReader(new FileReader(pathToWineData)));
 
-            int trainSize = (int) Math.round(wine.numInstances()*0.67);
+            // Convert the timestamps from seconds to milliseconds
+            Attribute dateAttribute = wine.attribute("date");
+            for (Instance instance : wine) {
+                instance.setValue(dateAttribute, instance.value(dateAttribute) * 1000);
+            }
 
-            int testSize = wine.numInstances()-trainSize;
-
-            Instances train = new Instances (wine,0,trainSize);
-            Instances test = new Instances (wine, trainSize,testSize);
-            ArrayList<Double> errors = new ArrayList<Double>();
+            // Sort the instances based on the timestamp field
+            wine.sort(dateAttribute);
 
             WekaForecaster forecaster = new WekaForecaster();
             forecaster.setFieldsToForecast("useful");
 
-
-            if(algorithm.equalsIgnoreCase("Gaussian")){
+            if (algorithme.equalsIgnoreCase("Gaussian")) {
                 forecaster.setBaseForecaster(new GaussianProcesses());
-            }
-            if(algorithm.equalsIgnoreCase("Linear")){
+            } else if (algorithme.equalsIgnoreCase("Linear")) {
                 forecaster.setBaseForecaster(new LinearRegression());
-            }
-            if(algorithm.equalsIgnoreCase("Multilayer")){
+            } else if (algorithme.equalsIgnoreCase("Multilayer")) {
                 forecaster.setBaseForecaster(new MultilayerPerceptron());
             }
+
             forecaster.getTSLagMaker().setTimeStampField("date");
             forecaster.buildForecaster(wine, System.out);
             forecaster.primeForecaster(wine);
 
-            List<List<NumericPrediction>> forecast = forecaster.forecast(nombre, System.out);
-            forecaster.postExecution();
-            for (int i = 0; i < nombre; i++) {
-                List<NumericPrediction> predsAtStep = forecast.get(i);
+            // Find the timestamp of the last instance in the dataset
+            long startTime = (long) wine.lastInstance().value(dateAttribute);
 
+            // Set the forecast range to the desired number of time steps (nombre)
+            int forecastRange = nombre;
+            long timeStepMillis = (long) ((startTime - wine.firstInstance().value(dateAttribute)) / forecastRange);
+
+            // Call the forecast method to get the predictions
+            List<List<NumericPrediction>> forecast = forecaster.forecast(forecastRange, System.out);
+
+            for (int i = 0; i < forecastRange; i++) {
+                List<NumericPrediction> predsAtStep = forecast.get(i);
                 for (int j = 0; j < 1; j++) {
                     NumericPrediction predForTarget = predsAtStep.get(j);
                     System.out.print("" + predForTarget.predicted() + " ");
                     ArrayList<String> aaaa = new ArrayList<String>();
-                    Date d = new Date((long)forecaster.getTSLagMaker().getCurrentTimeStampValue()-1000*60*(nombre-i-1));
-                    aaaa.add(d.getDay()+"-"+d.getHours()+"-"+d.getMinutes());
+                    long currentTimeMillis = startTime + timeStepMillis * (i + 1);
+                    Date d = new Date(currentTimeMillis);
+
+                    // Create a SimpleDateFormat object to format the date
+                    SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
+                    // Format the date and add it to the ArrayList
+                    String formattedDate = sdf.format(d);
+                    aaaa.add(formattedDate);
                     aaaa.add(String.valueOf(predForTarget.predicted()));
                     input.add(aaaa);
                 }
@@ -141,22 +158,6 @@ public class QueueSizeController {
     }
 
 
-@PostMapping("/write")
-    public String writeFile() {
-        String filePath = "/home/dataset.txt"; // Update the file path to the correct location
-        File outputFile = new File(filePath);
-        try {
-            FileUtils.writeStringToFile(outputFile, "Hello", StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            e.printStackTrace();
-            return "Error occurred while writing to file.";
-        }
-
-        return "Successfully wrote 'Hello' to file.";
-    }
-
-
-
     Gauge podRunningDuration = Gauge.build()
             .name("pod_running_duration_seconds")
             .help("Running duration of pods in a deployment")
@@ -165,7 +166,12 @@ public class QueueSizeController {
     @GetMapping("/GetPodRunningTime")
     public static void GetPodRunningTime(String[] args) throws IOException {
         List<DatasetEntry> dataset = new ArrayList<>();
-        String filePath = "/home/dataset.arff"; // Update the file path to the correct location
+        String targetPodIP = "file-write-service";  // Update with the service name or IP
+        int targetPodPort = 8082;                   // Update with the service port
+        String filePath = "/home/dataset.arff";     // Update with the desired file path in the target pod
+
+        // Connect to the target pod
+        Socket socket = new Socket(targetPodIP, targetPodPort);
 
         OkHttpClient client = new OkHttpClient();
         String prometheusQuery = "last_over_time(timestamp(kube_pod_status_phase{phase=\"Succeeded\",pod=~\"consumer-deployment.*\"})[1h:]) - ignoring(phase) group_right() last_over_time((kube_pod_created{pod=~\"consumer-deployment.*\"})[1h:])";

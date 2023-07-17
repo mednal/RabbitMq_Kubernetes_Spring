@@ -5,6 +5,10 @@ metadata:
 spec:
   scaleTargetRef:
     name: consumer-deployment
+  pollingInterval: 1
+  cooldownPeriod: 20
+  maxReplicaCount: 5
+  minReplicaCount: 1
   triggers:
     - type: rabbitmq
       metadata:
@@ -15,5 +19,3 @@ spec:
         username: guest
         password: guest
         value: "5"
-  minReplicaCount: 1
-  maxReplicaCount: 5
