@@ -63,6 +63,8 @@ import weka.classifiers.timeseries.WekaForecaster;
 import weka.core.Attribute;
 import weka.core.Instance;
 import weka.core.Instances;
+import weka.filters.Filter;
+import weka.filters.unsupervised.instance.RemoveDuplicates;
 
 
 @RestController
@@ -106,6 +108,9 @@ public class QueueSizeController {
             // Sort the instances based on the timestamp field
             wine.sort(dateAttribute);
 
+            // Use HashSet to track encountered timestamps during forecasting
+            HashSet<Long> seenTimestamps = new HashSet<>();
+
             WekaForecaster forecaster = new WekaForecaster();
             forecaster.setFieldsToForecast("useful");
 
@@ -118,15 +123,30 @@ public class QueueSizeController {
             }
 
             forecaster.getTSLagMaker().setTimeStampField("date");
-            forecaster.buildForecaster(wine, System.out);
-            forecaster.primeForecaster(wine);
+
+            // Create a new Instances object to store unique instances for training
+            Instances uniqueInstances = new Instances(wine, 0);
+            Attribute classAttribute = wine.attribute("useful");
+            for (Instance instance : wine) {
+                long timestamp = (long) instance.value(dateAttribute);
+
+                // Check if the timestamp is a duplicate, skip if already seen
+                if (!seenTimestamps.add(timestamp)) {
+                    continue;
+                }
+
+                uniqueInstances.add(instance);
+            }
+
+            forecaster.buildForecaster(uniqueInstances);
+            forecaster.primeForecaster(uniqueInstances);
 
             // Find the timestamp of the last instance in the dataset
-            long startTime = (long) wine.lastInstance().value(dateAttribute);
+            long startTime = (long) uniqueInstances.lastInstance().value(dateAttribute);
 
             // Set the forecast range to the desired number of time steps (nombre)
             int forecastRange = nombre;
-            long timeStepMillis = (long) ((startTime - wine.firstInstance().value(dateAttribute)) / forecastRange);
+            long timeStepMillis = (long) ((startTime - uniqueInstances.firstInstance().value(dateAttribute)) / forecastRange);
 
             // Call the forecast method to get the predictions
             List<List<NumericPrediction>> forecast = forecaster.forecast(forecastRange, System.out);
@@ -135,9 +155,10 @@ public class QueueSizeController {
                 List<NumericPrediction> predsAtStep = forecast.get(i);
                 for (int j = 0; j < 1; j++) {
                     NumericPrediction predForTarget = predsAtStep.get(j);
-                    System.out.print("" + predForTarget.predicted() + " ");
-                    ArrayList<String> aaaa = new ArrayList<String>();
+
+                    // Calculate the current timestamp for the forecasted step
                     long currentTimeMillis = startTime + timeStepMillis * (i + 1);
+
                     Date d = new Date(currentTimeMillis);
 
                     // Create a SimpleDateFormat object to format the date
@@ -145,6 +166,7 @@ public class QueueSizeController {
 
                     // Format the date and add it to the ArrayList
                     String formattedDate = sdf.format(d);
+                    ArrayList<String> aaaa = new ArrayList<>();
                     aaaa.add(formattedDate);
                     aaaa.add(String.valueOf(predForTarget.predicted()));
                     input.add(aaaa);
@@ -157,7 +179,6 @@ public class QueueSizeController {
         return input;
     }
 
-
     Gauge podRunningDuration = Gauge.build()
             .name("pod_running_duration_seconds")
             .help("Running duration of pods in a deployment")
@@ -166,12 +187,7 @@ public class QueueSizeController {
     @GetMapping("/GetPodRunningTime")
     public static void GetPodRunningTime(String[] args) throws IOException {
         List<DatasetEntry> dataset = new ArrayList<>();
-        String targetPodIP = "file-write-service";  // Update with the service name or IP
-        int targetPodPort = 8082;                   // Update with the service port
-        String filePath = "/home/dataset.arff";     // Update with the desired file path in the target pod
-
-        // Connect to the target pod
-        Socket socket = new Socket(targetPodIP, targetPodPort);
+        String filePath = "/home/dataset.arff"; // Update the file path to the correct location
 
         OkHttpClient client = new OkHttpClient();
         String prometheusQuery = "last_over_time(timestamp(kube_pod_status_phase{phase=\"Succeeded\",pod=~\"consumer-deployment.*\"})[1h:]) - ignoring(phase) group_right() last_over_time((kube_pod_created{pod=~\"consumer-deployment.*\"})[1h:])";

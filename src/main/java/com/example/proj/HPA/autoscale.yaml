@@ -5,8 +5,7 @@ metadata:
 spec:
   scaleTargetRef:
     name: consumer-deployment
-  pollingInterval: 1
-  cooldownPeriod: 20
+  cooldownPeriod: 0
   maxReplicaCount: 5
   minReplicaCount: 1
   triggers:

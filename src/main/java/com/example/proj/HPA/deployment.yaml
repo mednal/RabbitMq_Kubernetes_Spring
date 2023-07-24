@@ -14,7 +14,8 @@ spec:
       labels:
         app: consumer-app
     spec:
-      terminationGracePeriodSeconds: 120
+      terminationGracePeriodSeconds: 60
+
       containers:
         - name: consumer-container
           image: elnalouti/sigrepo:tagname
@@ -25,6 +26,7 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 8087
+
           env:
             - name: SPRING_RABBITMQ_HOST
               value: 172.17.0.2
